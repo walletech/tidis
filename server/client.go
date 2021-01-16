@@ -73,17 +73,8 @@ func newClient(app *App) *Client {
 	return client
 }
 
-func NewClientWallekv(conn net.Conn, app *App) *Client {
+func NewClientWallekv(app *App) *Client {
 	c := newClient(app)
-
-	c.conn = conn
-	// connection buffer setting
-
-	br := bufio.NewReader(conn)
-	c.rReader = goredis.NewRespReader(br)
-
-	bw := bufio.NewWriter(conn)
-	c.rWriter = goredis.NewRespWriter(bw)
 
 	app.clientWG.Add(1)
 	atomic.AddInt32(&app.clientCount, 1)
@@ -434,9 +425,9 @@ func (c *Client) handleRequest(req [][]byte) error {
 	return nil
 }
 
-func (c *Client) ForwardWallekv() error {
+func (c *Client) ForwardWallekv(r interface{}) error {
 	var err error
-	req, err := c.rReader.ParseRequest()
+	req := r.([][]byte)
 	if len(req) == 0 {
 		c.cmd = ""
 		c.args = nil
