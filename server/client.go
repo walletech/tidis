@@ -434,9 +434,9 @@ func (c *Client) handleRequest(req [][]byte) error {
 	return nil
 }
 
-func (c *Client) ForwardWallekv(r interface{}) error {
+func (c *Client) ForwardWallekv() error {
 	var err error
-	req := r.([][]byte)
+	req, err := c.rReader.ParseRequest()
 	if len(req) == 0 {
 		c.cmd = ""
 		c.args = nil
