@@ -46,7 +46,7 @@ type Client struct {
 	cmds    []Command
 	txn     kv.Transaction
 	respTxn []interface{}
-
+	RESP    interface{} // for wallekv
 	// connection authentation
 	isAuthed bool
 
@@ -71,6 +71,23 @@ func newClient(app *App) *Client {
 		dbId:     0,
 	}
 	return client
+}
+
+func NewClientWallekv(conn net.Conn, app *App) *Client {
+	c := newClient(app)
+
+	c.conn = conn
+	// connection buffer setting
+
+	br := bufio.NewReader(conn)
+	c.rReader = goredis.NewRespReader(br)
+
+	bw := bufio.NewWriter(conn)
+	c.rWriter = goredis.NewRespWriter(bw)
+
+	app.clientWG.Add(1)
+	atomic.AddInt32(&app.clientCount, 1)
+	return c
 }
 
 func ClientHandler(conn net.Conn, app *App) {
@@ -125,7 +142,34 @@ func (c *Client) IsTxn() bool {
 	return c.isTxn
 }
 
+//func (c *Client) Resp(resp interface{}) error {
+//	var err error
+//
+//	if c.isTxn {
+//		c.addResp(resp)
+//	} else {
+//		switch v := resp.(type) {
+//		case []interface{}:
+//			err = c.rWriter.WriteArray(v)
+//		case []byte:
+//			err = c.rWriter.WriteBulk(v)
+//		case nil:
+//			err = c.rWriter.WriteBulk(nil)
+//		case int64:
+//			err = c.rWriter.WriteInteger(v)
+//		case string:
+//			err = c.rWriter.WriteString(v)
+//		case error:
+//			err = c.rWriter.WriteError(v)
+//		default:
+//			err = terror.ErrUnknownType
+//		}
+//	}
+//
+//	return err
+//}
 func (c *Client) Resp(resp interface{}) error {
+	// for wallekv
 	var err error
 
 	if c.isTxn {
@@ -133,22 +177,48 @@ func (c *Client) Resp(resp interface{}) error {
 	} else {
 		switch v := resp.(type) {
 		case []interface{}:
-			err = c.rWriter.WriteArray(v)
+			c.RESP = v
 		case []byte:
-			err = c.rWriter.WriteBulk(v)
+			c.RESP = v
 		case nil:
-			err = c.rWriter.WriteBulk(nil)
+			c.RESP = nil
 		case int64:
-			err = c.rWriter.WriteInteger(v)
+			c.RESP = v
 		case string:
-			err = c.rWriter.WriteString(v)
+			c.RESP = v
 		case error:
-			err = c.rWriter.WriteError(v)
+			c.RESP = v
+		}
+	}
+
+	return err
+}
+
+// treat string as bulk array
+func (c *Client) Resp1(resp interface{}) error {
+	// for wallekv
+	var err error
+
+	if c.isTxn {
+		c.addResp(resp)
+	} else {
+		switch v := resp.(type) {
+		case []interface{}:
+			c.RESP = v
+		case []byte:
+			c.RESP = v
+		case nil:
+			c.RESP = nil
+		case int64:
+			c.RESP = v
+		case string:
+			c.RESP = v
+		case error:
+			c.RESP = v
 		default:
 			err = terror.ErrUnknownType
 		}
 	}
-
 	return err
 }
 
@@ -161,32 +231,32 @@ func (c *Client) FlushResp(resp interface{}) error {
 }
 
 // treat string as bulk array
-func (c *Client) Resp1(resp interface{}) error {
-	var err error
-
-	if c.isTxn {
-		c.addResp(resp)
-	} else {
-		switch v := resp.(type) {
-		case []interface{}:
-			err = c.rWriter.WriteArray(v)
-		case []byte:
-			err = c.rWriter.WriteBulk(v)
-		case nil:
-			err = c.rWriter.WriteBulk(nil)
-		case int64:
-			err = c.rWriter.WriteInteger(v)
-		case string:
-			err = c.rWriter.WriteBulk([]byte(v))
-		case error:
-			err = c.rWriter.WriteError(v)
-		default:
-			err = terror.ErrUnknownType
-		}
-	}
-
-	return err
-}
+//func (c *Client) Resp1(resp interface{}) error {
+//	var err error
+//
+//	if c.isTxn {
+//		c.addResp(resp)
+//	} else {
+//		switch v := resp.(type) {
+//		case []interface{}:
+//			err = c.rWriter.WriteArray(v)
+//		case []byte:
+//			err = c.rWriter.WriteBulk(v)
+//		case nil:
+//			err = c.rWriter.WriteBulk(nil)
+//		case int64:
+//			err = c.rWriter.WriteInteger(v)
+//		case string:
+//			err = c.rWriter.WriteBulk([]byte(v))
+//		case error:
+//			err = c.rWriter.WriteError(v)
+//		default:
+//			err = terror.ErrUnknownType
+//		}
+//	}
+//
+//	return err
+//}
 func (c *Client) connHandler() {
 
 	defer func(c *Client) {
@@ -364,6 +434,29 @@ func (c *Client) handleRequest(req [][]byte) error {
 	return nil
 }
 
+func (c *Client) ForwardWallekv(r interface{}) error {
+	var err error
+	req := r.([][]byte)
+	if len(req) == 0 {
+		c.cmd = ""
+		c.args = nil
+	} else {
+		c.cmd = strings.ToLower(string(req[0]))
+		c.args = req[1:]
+	}
+
+	start := time.Now()
+	if len(c.cmd) == 0 {
+		err = terror.ErrCommand
+	} else if f, ok := cmdFind(c.cmd); !ok {
+		err = terror.ErrCommand
+	} else {
+		err = f(c)
+	}
+	log.Debugf("command time cost %d", time.Now().Sub(start).Nanoseconds())
+	return err
+
+}
 func (c *Client) execute() error {
 	var err error
 
