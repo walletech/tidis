@@ -61,6 +61,27 @@ func NewApp(conf *config.Config) *App {
 	return app
 }
 
+func NewAppWithoutListen() *App {
+	var (
+		c   *config.Config
+	)
+	c = config.NewConfig(c, "", "10.9.184.40:2379", 5, "")
+
+	var err error
+	//var tdb *tidis.Tidis
+	//tdb, err = tidis.NewTidis(c)
+	app := &App{
+		conf: c,
+		auth: c.Tidis.Auth,
+	}
+
+	app.tdb, err = tidis.NewTidis(c)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	return app
+}
+
 func (app *App) GetTidis() *tidis.Tidis {
 	return app.tdb
 }
