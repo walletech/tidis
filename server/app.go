@@ -61,11 +61,12 @@ func NewApp(conf *config.Config) *App {
 	return app
 }
 
-func NewAppWithoutListen() *App {
+func NewAppWallekv(addr string, retry int, auth string) *App {
 	var (
 		c   *config.Config
 	)
-	c = config.NewConfig(c, "", "10.9.184.40:2379", 5, "")
+	c = config.NewConfig(c, "", addr, retry, auth)
+	//c = config.NewConfig(c, "", "10.9.184.40:2379", 5, "")
 
 	var err error
 	//var tdb *tidis.Tidis
